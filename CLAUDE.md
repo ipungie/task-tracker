@@ -126,6 +126,19 @@ DB/page IDs are baked in as constants (they're already public in this file / REA
 `NOTION_TOKEN` is required. `NOTION_MAIN_HUB` / `NOTION_TASKS_DB` / `NOTION_WORKOUTS_DB` /
 `NOTION_BODY_DB` override them. A DB that 404s → "share it with the integration".
 
+**Live MAIN HUB layout** (as of first dashboard run, 2026-09-07): headings `Kepentingan Ipung:`
+(child pages + a `child_database`) and `Kalender Ipung:` (a **`bookmark` block — not a real
+`/embed`**, so it only renders a link card, plus four `child_database` blocks). The dashboard
+`toggle` was appended as the **last block, collapsed** — expand it in the UI, or drag it above the
+databases once (the `after` logic then keeps it there). Google Calendar still needs the bookmark
+replaced with a proper `/embed`.
+
+**Current data state**: Body Metrics DB is **empty** (the InBody seed row, build-order step 2, was
+never added) so the Body panel shows "No body metrics logged yet."; no Workouts fall in the last
+7 days (newest Hevy session is 2026-08-28) so the training panel reads 0/0; Tasks DB has nothing
+matching. All three panels populate once real rows land — the script itself is verified working
+(ran twice against live Notion, one toggle, other 13 page blocks untouched).
+
 ## Files
 
 ```
