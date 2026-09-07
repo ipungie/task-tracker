@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """One-shot: create the Tasks / Workouts / Body Metrics databases under a parent Notion page.
 
-Idempotent — skips any database that already exists as a child of the page with the same title.
+Idempotent — a database that already exists as a child of the page (matched by title) is not
+recreated; instead any properties in the schema below that it's missing are added to it. So
+adding a property here and re-running is enough to roll it out.
 Views (calendar/board), the Google Calendar embed, and linked-database blocks are NOT creatable
 via the Notion API; add those by hand afterwards.
 
@@ -55,6 +57,14 @@ SCHEMAS: dict[str, dict] = {
         "BP": {"rich_text": {}},
         "Lab report": {"files": {}},
         "Notes": {"rich_text": {}},
+        # InBody scan numbers — the dashboard's Body panel shows any of these that are present.
+        "SMM": {"number": {}},
+        "Body Fat Mass": {"number": {}},
+        "Visceral Fat": {"number": {}},
+        "BMI": {"number": {}},
+        "Waist-Hip Ratio": {"number": {}},
+        "InBody Score": {"number": {}},
+        "BMR": {"number": {}},
     },
 }
 
@@ -90,6 +100,25 @@ def existing_child_dbs(page_id: str) -> dict[str, str]:
         cursor = data["next_cursor"]
 
 
+def patch_missing_props(db_id: str, want: dict) -> list[str]:
+    """Add any properties in `want` the database doesn't already have. Returns the names added.
+
+    ponytail: only adds; never renames or retypes an existing property, and won't touch a title
+    prop that lives under a different name (would be a second title -> Notion 400).
+    """
+    r = requests.get(f"{API}/databases/{db_id}", headers=headers(), timeout=30)
+    r.raise_for_status()
+    have = set(r.json()["properties"])
+    missing = {name: spec for name, spec in want.items() if name not in have}
+    if not missing:
+        return []
+    r = requests.patch(f"{API}/databases/{db_id}", headers=headers(),
+                       json={"properties": missing}, timeout=30)
+    if r.status_code >= 400:
+        sys.exit(f"patch {db_id} failed: {r.status_code} {r.text}")
+    return sorted(missing)
+
+
 def create_db(page_id: str, title: str, props: dict) -> str:
     r = requests.post(f"{API}/databases", headers=headers(), json={
         "parent": {"type": "page_id", "page_id": page_id},
@@ -116,7 +145,9 @@ def main() -> None:
     have = existing_child_dbs(page_id)
     for title, props in SCHEMAS.items():
         if title in have:
-            print(f"{title}: exists  {have[title].replace('-', '')}")
+            added = patch_missing_props(have[title], props)
+            note = f"  + {', '.join(added)}" if added else ""
+            print(f"{title}: exists  {have[title].replace('-', '')}{note}")
             continue
         db_id = create_db(page_id, title, props).replace("-", "")
         print(f"{title}: created {db_id}")

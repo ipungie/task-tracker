@@ -38,9 +38,9 @@ file that seeded this repo: `~/.claude/plans/ancient-baking-pony.md`.
   by `External ID` before creating.
 - **Secrets never in the repo.** `.env` is gitignored; `.env.example` documents the names; real
   values live in GitHub Actions repository secrets.
-- **`setup_notion.py` must stay idempotent** — safe to re-run; it skips any database that already
-  exists as a child of the page. (It does *not* yet patch missing properties onto an existing
-  database — build-order item, see Current status.)
+- **`setup_notion.py` must stay idempotent** — safe to re-run; it doesn't recreate a database that
+  already exists as a child of the page, and it adds any schema property that database is missing
+  (add a prop to `SCHEMAS`, re-run, done). It never renames or retypes an existing property.
 - Prefer the laziest thing that works (this repo runs the `ponytail` + `caveman` skills). Regex over
   an LLM, a Notion embed over a sync, cron over a webhook. Mark deliberate corners with a
   `# ponytail:` comment naming the ceiling.
@@ -68,10 +68,9 @@ Parent page **MAIN HUB**: `be220a6633b8426ab6f88e563d168e8a`
   `Avg HR` (number), `Exercises` (text), `External ID` (text, the upsert key), `Link` (url).
   **Property names are matched by string in the scripts — don't rename without updating the code.**
 - **Body Metrics**: `Entry` (title), `Date`, `Weight`, `Body Fat %`, `Resting HR`, `BP` (text),
-  `Lab report` (files — attach the InBody PDF by hand), `Notes`. **Intended** (not yet created by
-  `setup_notion.py`): numbers `SMM`, `Body Fat Mass`, `Visceral Fat`, `BMI`, `Waist-Hip Ratio`,
-  `InBody Score`, `BMR`. The dashboard already reads them if present (absent ones are skipped) —
-  add them in the Notion UI or extend `setup_notion.py`.
+  `Lab report` (files — attach the InBody PDF by hand), `Notes`, plus numbers `SMM`,
+  `Body Fat Mass`, `Visceral Fat`, `BMI`, `Waist-Hip Ratio`, `InBody Score`, `BMR` (all created by
+  `setup_notion.py`; the dashboard shows whichever are present on a row).
 - **Quick Log**: `Note` (title — the typed line), `Date` (date, default today), `Parsed` (checkbox),
   `Result` (text — parser summary or error).
 
@@ -144,11 +143,12 @@ DB/page IDs are baked in as constants (they're already public in this file / REA
 databases once (the `after` logic then keeps it there). Google Calendar still needs the bookmark
 replaced with a proper `/embed`.
 
-**Current data state**: Body Metrics DB is **empty** (the InBody seed row, build-order step 2, was
-never added) so the Body panel shows "No body metrics logged yet."; no Workouts fall in the last
-7 days (newest Hevy session is 2026-08-28) so the training panel reads 0/0; Tasks DB has nothing
-matching. All three panels populate once real rows land — the script itself is verified working
-(ran twice against live Notion, one toggle, other 13 page blocks untouched).
+**Current data state**: Body Metrics has **one row** — the InBody scan from 2026-07-07 (Urban Gym
+Bandung: Weight 96.3, BF% 31.0, SMM 38.1, BFM 29.9, Visceral Fat 12, BMI 31.4, WHR 0.98, InBody
+Score 71, BMR 1804); with a single row the Body panel shows values only (no delta), and the scan
+PDF still needs attaching to `Lab report` by hand. No Workouts fall in the last 7 days (newest
+Hevy session is 2026-08-28) so the training panel reads 0/0; Tasks has 1 row flagged. The script
+is verified working against live Notion (one toggle, other page blocks untouched).
 
 ## Files
 
@@ -156,7 +156,7 @@ Present:
 
 ```
 scripts/
-  setup_notion.py        # one-shot: create the Tasks/Workouts/Body Metrics DBs. Run against MAIN HUB.
+  setup_notion.py        # create the Tasks/Workouts/Body Metrics DBs + add any missing schema props. Run against MAIN HUB.
   strava_to_notion.py    # Strava OAuth refresh -> activities since watermark -> upsert Workouts
   hevy_csv_to_notion.py  # parse committed data/hevy.csv (Hevy free export) -> upsert Weights Workouts
   dashboard_to_notion.py # rebuild the "📊 Weekly Dashboard" toggle on MAIN HUB (training/body/tasks)
@@ -210,21 +210,20 @@ eyeballing the rows; running any sync twice must create nothing the second time.
 
 ## Current status
 
-- `setup_notion.py` created Tasks / Workouts / Body Metrics under MAIN HUB (base props only).
-- Committed locally: `setup_notion.py`, `strava_to_notion.py`, `hevy_csv_to_notion.py`,
-  `dashboard_to_notion.py`, `strava-sync.yml`, `data/hevy.csv`, `AGENTS.md`. All `--selfcheck`s
-  pass; `dashboard_to_notion.py` has been run against live Notion (twice, clean). **Not pushed** —
-  the private GitHub repo `ipungie/personal-task-tracker` doesn't exist yet, so CI has never run.
-- `strava_to_notion.py` not yet run for real — needs the one-time Strava OAuth (README).
+- Pushed to `github.com/ipungie/task-tracker` (private). `strava-sync.yml` runs on Actions every
+  6h; a manual dispatch on 2026-09-07 went green (Strava step 400s and is skipped via
+  `continue-on-error`; Hevy + dashboard steps pass).
+- Actions secrets set: `NOTION_TOKEN`, `NOTION_WORKOUTS_DB`. Strava secrets not set (no API access).
+- `setup_notion.py` created Tasks / Workouts / Body Metrics under MAIN HUB and has since added the
+  7 InBody number props to Body Metrics. One InBody row (2026-07-07) is in Body Metrics.
+- `strava_to_notion.py` never run for real — needs the one-time Strava OAuth (README) if access
+  is ever obtained.
 - Remaining per the plan's build order:
-  - extend `setup_notion.py`: patch missing props onto existing DBs, add the Body Metrics numbers,
-    add the Quick Log DB, add `QuickLog` to `Workouts.Source`.
-  - seed the InBody baseline row in Body Metrics (Body panel is empty until then).
+  - add the Quick Log DB to `setup_notion.py` (+ `QuickLog` to `Workouts.Source`).
   - Weekly Check-in page + `weekly_summary.py` + `weekly-summary.yml`.
   - `quicklog_to_notion.py` + wire it into the sync workflow.
-  - Strava OAuth; create the private GitHub repo, push, add Actions secrets, dispatch once.
   - manual Notion polish: Tasks calendar/board views, replace the MAIN HUB Google Calendar
-    `bookmark` with a real `/embed`, linked-DB views.
-  - rename `strava-sync.yml` -> `sync.yml`.
-- The Notion integration token was pasted in a chat once and should be rotated at
-  <https://www.notion.so/my-integrations> before the repo is pushed.
+    `bookmark` with a real `/embed`, linked-DB views, attach the InBody PDF to `Lab report`.
+  - rename `strava-sync.yml` -> `sync.yml` (and drop or keep the parked Strava step).
+- The Notion integration token was pasted in a chat once — rotate it at
+  <https://www.notion.so/my-integrations> and update `.env` + the `NOTION_TOKEN` Actions secret.

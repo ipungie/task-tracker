@@ -27,8 +27,9 @@ repo.
 1. Create an internal integration at <https://www.notion.so/my-integrations>, copy the token.
 2. Create these databases in one workspace and **share each one with the integration** (••• → Add
    connections). `NOTION_TOKEN=... NOTION_PARENT_PAGE=<MAIN HUB page id> python scripts/setup_notion.py`
-   creates the three base databases for you (it skips any that already exist); the extra Body Metrics
-   number fields below are not created yet — add them by hand if you want them on the dashboard:
+   creates them for you — it doesn't recreate a database that already exists, but it does add any
+   schema property (including the Body Metrics InBody numbers below) that's missing, so it's safe to
+   re-run after editing the schema:
 
    **Tasks** — `Name` (title), `Status` (select: Todo / Doing / Blocked / Done), `Due` (date),
    `Priority` (select), `Project` (select or relation), `Notes` (text). Add a calendar view on
@@ -40,9 +41,9 @@ repo.
    *Property names must match exactly — the script sets them by name.*
 
    **Body Metrics** — `Entry` (title), `Date` (date), `Weight` (number), `Body Fat %` (number),
-   `Resting HR` (number), `BP` (text), `Lab report` (files), `Notes` (text). Optional numbers the
-   dashboard will also show if present: `SMM`, `Body Fat Mass`, `Visceral Fat`, `BMI`,
-   `Waist-Hip Ratio`, `InBody Score`, `BMR`.
+   `Resting HR` (number), `BP` (text), `Lab report` (files), `Notes` (text), plus InBody numbers
+   `SMM`, `Body Fat Mass`, `Visceral Fat`, `BMI`, `Waist-Hip Ratio`, `InBody Score`, `BMR`. The
+   dashboard shows whichever numbers are filled on a row.
 
 3. On the **MAIN HUB** page (the dashboard script writes its toggle here), add a `/embed` block with
    your Google Calendar's secret embed URL (Google Calendar → Settings → your calendar → *Integrate
