@@ -114,8 +114,9 @@ def task_event_body(row: dict) -> dict | None:
         "start": {"date": day},
         "end": {"date": _next_day(day)},
         "transparency": "transparent",  # free, not busy
-        # ponytail: no "visibility":"private" — an unauthenticated Notion /embed of a public
-        # calendar strips private events, and it's your own calendar anyway.
+        # explicit "default" (not "private"): an unauthenticated Notion /embed of a public
+        # calendar hides private events. Explicit so a patch resets any already-synced event.
+        "visibility": "default",
         "reminders": {"useDefault": False,
                       "overrides": [{"method": "popup", "minutes": TASK_REMINDER_MIN}]},
         "extendedProperties": _tagged(row["id"], "task"),
@@ -291,7 +292,7 @@ def _selfcheck() -> None:
     b = task_event_body(task)
     assert b["summary"] == "📋 Ship report"
     assert b["start"] == {"date": "2026-09-10"} and b["end"] == {"date": "2026-09-11"}, b
-    assert b["transparency"] == "transparent"
+    assert b["transparency"] == "transparent" and b["visibility"] == "default"
     assert b["reminders"]["overrides"][0]["minutes"] == 540
     assert b["extendedProperties"]["private"] == {
         "notionSync": "1", "notionPageId": task["id"], "kind": "task"}
