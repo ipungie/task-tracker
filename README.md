@@ -82,12 +82,21 @@ You then need a **refresh token** with the `activity:read_all` scope:
 ```
 python scripts/strava_to_notion.py --selfcheck   # offline sanity check of the pure helpers
 python scripts/strava_to_notion.py               # real run
+python scripts/hevy_csv_to_notion.py             # import data/hevy.csv (Hevy free export) into Workouts
+python scripts/dashboard_to_notion.py            # rebuild the "📊 Weekly Dashboard" on the Dashboard page
 ```
 
-It looks at the newest `Source = Strava` row in Workouts and fetches activities after that date (or
-the last `STRAVA_BACKFILL_DAYS` days if there are none yet), then creates one Workout row per new
-activity. Running it twice in a row must report `0 created` the second time — that's the
-duplicate-prevention working.
+`strava_to_notion.py` looks at the newest `Source = Strava` row in Workouts and fetches activities
+after that date (or the last `STRAVA_BACKFILL_DAYS` days if there are none yet), then creates one
+Workout row per new activity. Running it twice in a row must report `0 created` the second time —
+that's the duplicate-prevention working.
+
+`dashboard_to_notion.py` reads the Workouts / Body Metrics / Tasks databases and rebuilds a single
+toggle block ("📊 Weekly Dashboard") on the Dashboard page each run — this week's training vs
+targets, latest body metrics vs baseline, and tasks that are overdue / due soon / high priority / in
+progress. It only ever touches that one toggle; the Google Calendar `/embed` and linked views from
+step 3 of *Notion setup* are left alone (the Notion API can't create those — they stay a one-time
+manual paste).
 
 ## GitHub Actions (the cron)
 

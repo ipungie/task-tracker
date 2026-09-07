@@ -95,6 +95,37 @@ second guard). Missing `data/hevy.csv` = no-op. Quick Log stays for quick one-of
 Hevy's CSV date format varies by app version — `parse_dt()` covers the common ones; add a format
 there if a real export doesn't parse (`--selfcheck` exercises the pure helpers).
 
+## MAIN HUB dashboard (`dashboard_to_notion.py`)
+
+Runs on the same cron. Rebuilds an at-a-glance summary on the MAIN HUB page
+(`be220a6633b8426ab6f88e563d168e8a`) from the three databases. It **owns exactly one block**: a
+top-level `toggle` whose title starts with `DASH_MARKER` (`"📊 Weekly Dashboard"`). Each run lists
+the page's children, deletes every marker toggle, and re-appends a fresh one via `PATCH
+.../children` with an `after` param so it stays in place instead of jumping to the page end. First
+run (or if the toggle was deleted/renamed past the marker prefix) appends at the end — drag it once
+and subsequent runs keep that position. **Nothing else on the page is touched** — the Google
+Calendar `/embed` and any hand-made linked-DB views are safe, and the Notion API can't create those
+anyway (still a one-time manual paste, README §3).
+
+Three panels, built by pure functions (parsed rows in, block dicts out — `--selfcheck` covers them):
+
+- **🏋️ This week** — Workouts with `Date` in the last 7 days: count `Type = Weights` rows vs
+  `LIFT_TARGET` (2), sum `Duration` of `Type = Cardio` vs `CARDIO_MIN_TARGET` (200). "n / target — k
+  to go". Constants at the top of the file.
+- **📊 Body** — Body Metrics sorted by `Date`: `oldest → latest  (±delta)` for every numeric
+  property present (preferred order first, then any extras). One row → values only. No rows → "none
+  yet". `# ponytail:` baseline is the oldest row; switch to previous-row if InBody scans get
+  frequent.
+- **✅ Needs attention (N)** — Tasks with `Status ≠ Done` that are overdue, due within 7 days,
+  `Priority = High`, or `Status = Doing`. One `to_do` (unchecked) each: a page-mention chip +
+  ` — <due> · <priority>`, `⚠️ ` prefix when overdue. Overdue first, then soonest due; capped at 15
+  with a "+ N more" line. `select_name()` reads both `select` and `status` property types, so
+  converting `Tasks.Status` to a real Status type in the UI won't break it.
+
+DB/page IDs are baked in as constants (they're already public in this file / README); only
+`NOTION_TOKEN` is required. `NOTION_MAIN_HUB` / `NOTION_TASKS_DB` / `NOTION_WORKOUTS_DB` /
+`NOTION_BODY_DB` override them. A DB that 404s → "share it with the integration".
+
 ## Files
 
 ```
@@ -102,23 +133,25 @@ scripts/
   setup_notion.py        # one-shot/idempotent: create DBs, patch missing props. Run against MAIN HUB.
   strava_to_notion.py    # hourly: Strava OAuth refresh -> activities since watermark -> upsert Workouts
   hevy_csv_to_notion.py  # hourly: parse committed data/hevy.csv (Hevy free export) -> upsert Weights Workouts
+  dashboard_to_notion.py # hourly: rebuild the "📊 Weekly Dashboard" toggle on MAIN HUB (training/body/tasks)
   quicklog_to_notion.py  # hourly: unparsed Quick Log rows -> Workout row(s), regex
   weekly_summary.py       # weekly: last-7-day Workouts vs targets + weight delta -> block on Weekly Check-in
 data/
   hevy.csv               # committed Hevy "Export & Backup Data" CSV; re-export over it to add sessions. Not present until first export.
 .github/workflows/
-  sync.yml               # cron hourly + manual: strava_to_notion.py then hevy_csv_to_notion.py then quicklog_to_notion.py
+  sync.yml               # cron hourly + manual: strava_to_notion.py, hevy_csv_to_notion.py, dashboard_to_notion.py, quicklog_to_notion.py
   weekly-summary.yml      # cron Mon 06:00 UTC + manual: weekly_summary.py
 ```
 
-`weekly_summary.py` targets are constants at the top of the file: `CARDIO_MIN_TARGET = 200`,
-`LIFT_TARGET = 2`.
+`dashboard_to_notion.py` and `weekly_summary.py` share the same targets, constants at the top of
+each file: `CARDIO_MIN_TARGET = 200`, `LIFT_TARGET = 2`.
 
 ## Env vars
 
 `NOTION_TOKEN`, `NOTION_WORKOUTS_DB`, `NOTION_QUICKLOG_DB`, `NOTION_BODY_DB`, `NOTION_SUMMARY_PAGE`,
 `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN`, optional `STRAVA_BACKFILL_DAYS`,
-optional `HEVY_CSV_PATH` (default `data/hevy.csv`).
+optional `HEVY_CSV_PATH` (default `data/hevy.csv`), optional `NOTION_MAIN_HUB` / `NOTION_TASKS_DB`
+(dashboard; default to the IDs above).
 
 ## Commands
 

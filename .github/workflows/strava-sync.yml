@@ -27,3 +27,8 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_WORKOUTS_DB: ${{ secrets.NOTION_WORKOUTS_DB }}
+      # Rebuilds the "📊 Weekly Dashboard" toggle on the MAIN HUB page (training / body / tasks).
+      # DB + page IDs are baked into the script; only the token is needed here.
+      - run: python scripts/dashboard_to_notion.py
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
