@@ -2,9 +2,11 @@
 """Rebuild the MAIN HUB dashboard section in Notion: weekly training, body stats, tasks.
 
 One independent script (like strava_to_notion.py). It owns a single `toggle` block on the MAIN HUB
-page whose title starts with DASH_MARKER; every run deletes that toggle and rewrites it in place.
-Nothing else on the page is touched -- the Google Calendar embed and linked-database views can't be
-created via the Notion API anyway, they stay a one-time manual paste.
+page whose title starts with DASH_MARKER; every run deletes that toggle and re-appends a fresh one
+pinned to the TOP of the page (via the Notion `position: {"type": "start"}` param, which needs
+Notion-Version 2026-03-11 on that one request). Nothing else on the page is touched -- the Google
+Calendar embed and linked-database views can't be created via the Notion API anyway, they stay a
+one-time manual paste.
 
 Env: NOTION_TOKEN (required). Optional overrides: NOTION_MAIN_HUB, NOTION_TASKS_DB,
 NOTION_WORKOUTS_DB, NOTION_BODY_DB (defaults are the IDs recorded in CLAUDE.md / README.md).
@@ -22,8 +24,11 @@ from datetime import date, datetime, timedelta
 
 import requests
 
-NOTION_VERSION = "2022-06-28"
-API = "https://api.notion.com/v1"
+from notion_common import API, env, notion_headers, notion_query
+
+# Notion added position:{type:"start"} (prepend as first child) in this API version.
+# Used only for the one append-children call; the rest of the script stays on the default.
+PREPEND_VERSION = "2026-03-11"
 
 # IDs are public (they're in CLAUDE.md/README.md); only the token is a secret. Env overrides win.
 MAIN_HUB = os.environ.get("NOTION_MAIN_HUB", "be220a6633b8426ab6f88e563d168e8a")
@@ -39,25 +44,6 @@ BODY_METRIC_ORDER = [
     "Weight", "Body Fat %", "SMM", "Body Fat Mass", "Visceral Fat",
     "BMI", "Waist-Hip Ratio", "InBody Score", "BMR",
 ]
-
-
-# --- shared helpers -----------------------------------------------------------------
-# ponytail: 3rd copy of env()/notion_headers() after strava/hevy -- extract
-# scripts/notion_common.py if a 4th script appears.
-
-def env(name: str, default: str | None = None) -> str:
-    v = os.environ.get(name, default)
-    if v is None:
-        sys.exit(f"missing required env var: {name}")
-    return v
-
-
-def notion_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {env('NOTION_TOKEN')}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
 
 
 # --- pure helpers -----------------------------------------------------------------
@@ -230,23 +216,6 @@ def build_section(workout_rows, body_rows, task_rows, today: date) -> list[dict]
 
 # --- Notion I/O ---------------------------------------------------------------------
 
-def _db_query(db_id: str, payload: dict) -> list[dict]:
-    out, cursor = [], None
-    while True:
-        body = dict(payload)
-        if cursor:
-            body["start_cursor"] = cursor
-        r = requests.post(f"{API}/databases/{db_id}/query", headers=notion_headers(), json=body, timeout=30)
-        if r.status_code == 404:
-            sys.exit(f"database {db_id} not found — share it with the integration (••• > Connections)")
-        r.raise_for_status()
-        data = r.json()
-        out.extend(data["results"])
-        if not data.get("has_more"):
-            return out
-        cursor = data["next_cursor"]
-
-
 def _page_children(block_id: str) -> list[dict]:
     out, cursor = [], None
     while True:
@@ -264,26 +233,15 @@ def _page_children(block_id: str) -> list[dict]:
         cursor = data["next_cursor"]
 
 
-def find_marker_toggles(children: list[dict]) -> tuple[list[str], str | None]:
-    """Ids of every dashboard toggle, plus the id of the block just before the first one."""
-    ids: list[str] = []
-    after_id = None
-    prev_id = None
-    for b in children:
-        is_marker = (b.get("type") == "toggle"
-                     and _plain(b.get("toggle", {}).get("rich_text", [])).startswith(DASH_MARKER))
-        if is_marker:
-            if not ids:
-                after_id = prev_id
-            ids.append(b["id"])
-        else:
-            prev_id = b["id"]
-    return ids, after_id
+def find_marker_toggles(children: list[dict]) -> list[str]:
+    """Ids of every top-level dashboard toggle (title starts with DASH_MARKER)."""
+    return [b["id"] for b in children
+            if b.get("type") == "toggle"
+            and _plain(b.get("toggle", {}).get("rich_text", [])).startswith(DASH_MARKER)]
 
 
 def rewrite_dashboard(section: list[dict]) -> None:
-    stale, after_id = find_marker_toggles(_page_children(MAIN_HUB))
-    for bid in stale:
+    for bid in find_marker_toggles(_page_children(MAIN_HUB)):
         r = requests.delete(f"{API}/blocks/{bid}", headers=notion_headers(), timeout=30)
         r.raise_for_status()
         time.sleep(0.35)  # ponytail: fixed sleep for Notion's ~3 req/s cap; swap for 429-retry if it bites
@@ -291,22 +249,22 @@ def rewrite_dashboard(section: list[dict]) -> None:
         "rich_text": _rt(f"{DASH_MARKER}  ·  updated {date.today().isoformat()}"),
         "children": section,
     }}
-    payload: dict = {"children": [toggle]}
-    if after_id:
-        payload["after"] = after_id  # keep the dashboard where it is instead of jumping to page end
-    r = requests.patch(f"{API}/blocks/{MAIN_HUB}/children", headers=notion_headers(), json=payload, timeout=30)
+    # position:{type:"start"} pins the toggle to the top of the page; needs the newer API version.
+    r = requests.patch(f"{API}/blocks/{MAIN_HUB}/children",
+                       headers=notion_headers(PREPEND_VERSION),
+                       json={"children": [toggle], "position": {"type": "start"}}, timeout=30)
     r.raise_for_status()
 
 
 def run() -> None:
     env("NOTION_TOKEN")  # fail fast with a clear message
     today = date.today()
-    workouts = _db_query(WORKOUTS_DB, {
+    workouts = notion_query(WORKOUTS_DB, {
         "filter": {"property": "Date", "date": {"on_or_after": (today - timedelta(days=7)).isoformat()}},
         "page_size": 100,
     })
-    body = _db_query(BODY_DB, {"sorts": [{"property": "Date", "direction": "ascending"}], "page_size": 100})
-    tasks = _db_query(TASKS_DB, {"page_size": 100})
+    body = notion_query(BODY_DB, {"sorts": [{"property": "Date", "direction": "ascending"}], "page_size": 100})
+    tasks = notion_query(TASKS_DB, {"page_size": 100})
 
     section = build_section(workouts, body, tasks, today)
     rewrite_dashboard(section)
@@ -372,9 +330,9 @@ def _selfcheck() -> None:
 
     kids = [{"id": "a", "type": "paragraph"}, {"id": "b", "type": "divider"},
             {"id": "c", "type": "toggle", "toggle": {"rich_text": [{"plain_text": DASH_MARKER + " · updated x"}]}},
-            {"id": "d", "type": "paragraph"}]
-    ids, after = find_marker_toggles(kids)
-    assert ids == ["c"] and after == "b", (ids, after)
+            {"id": "d", "type": "paragraph"},
+            {"id": "e", "type": "toggle", "toggle": {"rich_text": [{"plain_text": "unrelated"}]}}]
+    assert find_marker_toggles(kids) == ["c"], find_marker_toggles(kids)
     print("selfcheck ok")
 
 

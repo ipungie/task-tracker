@@ -25,7 +25,8 @@ from datetime import datetime
 
 import requests
 
-NOTION_VERSION = "2022-06-28"
+from notion_common import env, notion_headers
+
 DEFAULT_CSV = "data/hevy.csv"
 
 # ponytail: Hevy's export format varies by app version/locale. These cover what's been seen
@@ -35,21 +36,6 @@ _DT_FORMATS = (
     "%d %b %Y, %H:%M", "%d %b %Y, %H:%M:%S",
     "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
 )
-
-
-def env(name: str, default: str | None = None) -> str:
-    v = os.environ.get(name, default)
-    if v is None:
-        sys.exit(f"missing required env var: {name}")
-    return v
-
-
-def notion_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {env('NOTION_TOKEN')}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
 
 
 # --- pure helpers -----------------------------------------------------------------

@@ -15,8 +15,9 @@ Actions cron (free, stateless, no server). No framework, no bundler, no web app.
 
 Two domains:
 
-1. **Work** — tasks with deadlines, a board/calendar view, an embedded Google Calendar. All native
-   Notion; no code.
+1. **Work** — tasks with deadlines, a board/calendar view, an embedded Google Calendar, and an
+   `Events` DB for meetings. Task deadlines and Events are pushed one-way to Google Calendar by
+   `notion_to_gcal.py` so they nag on the phone; everything else here is native Notion, no code.
 2. **Health/fitness** — body composition from InBody scans (manual entry), cardio auto-pulled from
    Strava, lifts from a committed Hevy CSV export (and, planned, a typed Quick Log parsed by
    regex), and a weekly check-in that compares logged activity to fixed targets. **No calorie
@@ -55,6 +56,7 @@ Parent page **MAIN HUB**: `be220a6633b8426ab6f88e563d168e8a`
 | Tasks | `3d4fdaa633b081638123f1307cd1f7af` |
 | Workouts | `3d4fdaa633b081cfbc6ed0d096baa224` |
 | Body Metrics | `3d4fdaa633b081bc8e1ac8e607ead38a` |
+| Events | `3d4fdaa633b08151b6daea9717834fae` (created 2026-09-07; set as `NOTION_EVENTS_DB`) |
 | Quick Log | *planned* — to be created by `setup_notion.py`; ID goes in `.env` as `NOTION_QUICKLOG_DB` |
 | Weekly Check-in (page) | *planned* — created during setup; `.env` as `NOTION_SUMMARY_PAGE` |
 
@@ -63,6 +65,9 @@ Parent page **MAIN HUB**: `be220a6633b8426ab6f88e563d168e8a`
 - **Tasks**: `Name` (title), `Status` (select: Todo/Doing/Blocked/Done — API can't make a Status-type
   property; convert in the UI if wanted), `Due` (date), `Priority` (select), `Project` (select),
   `Notes` (text).
+- **Events**: `Name` (title), `When` (date — set a start time, and an end time; a date with no time
+  becomes an all-day calendar event), `Location` (text), `Notes` (text). Meant to be used via a
+  Calendar view in Notion (no table). `notion_to_gcal.py` pushes each row to Google Calendar.
 - **Workouts**: `Name` (title), `Date` (date), `Type` (select: Cardio/Weights/Other), `Source`
   (select: Strava/Hevy/Manual/QuickLog), `Distance` (number, km), `Duration` (number, min),
   `Avg HR` (number), `Exercises` (text), `External ID` (text, the upsert key), `Link` (url).
@@ -107,15 +112,16 @@ there if a real export doesn't parse (`--selfcheck` exercises the pure helpers).
 
 ## MAIN HUB dashboard (`dashboard_to_notion.py`)
 
-Runs on the same cron. Rebuilds an at-a-glance summary on the MAIN HUB page
-(`be220a6633b8426ab6f88e563d168e8a`) from the three databases. It **owns exactly one block**: a
-top-level `toggle` whose title starts with `DASH_MARKER` (`"📊 Weekly Dashboard"`). Each run lists
-the page's children, deletes every marker toggle, and re-appends a fresh one via `PATCH
-.../children` with an `after` param so it stays in place instead of jumping to the page end. First
-run (or if the toggle was deleted/renamed past the marker prefix) appends at the end — drag it once
-and subsequent runs keep that position. **Nothing else on the page is touched** — the Google
-Calendar `/embed` and any hand-made linked-DB views are safe, and the Notion API can't create those
-anyway (still a one-time manual paste, README §3).
+Runs on both crons (`fast.yml` every 30 min, `strava-sync.yml` every 6h). Rebuilds an at-a-glance
+summary on the MAIN HUB page (`be220a6633b8426ab6f88e563d168e8a`) from the three databases. It
+**owns exactly one block**: a top-level `toggle` whose title starts with `DASH_MARKER`
+(`"📊 Weekly Dashboard"`). Each run lists the page's children, deletes every marker toggle, and
+re-appends a fresh one **pinned to the top** via `PATCH .../children` with
+`position: {"type": "start"}` — which needs `Notion-Version: 2026-03-11`, sent on that one request
+only (the rest of the script stays on `2022-06-28`; the `2025-09-03`+ data-source model changes
+DB-query semantics). **Nothing else on the page is touched** — the Google Calendar `/embed` and any
+hand-made linked-DB views are safe, and the Notion API can't create those anyway (still a one-time
+manual paste, README §3).
 
 Three panels, built by pure functions (parsed rows in, block dicts out — `--selfcheck` covers them):
 
@@ -136,12 +142,12 @@ DB/page IDs are baked in as constants (they're already public in this file / REA
 `NOTION_TOKEN` is required. `NOTION_MAIN_HUB` / `NOTION_TASKS_DB` / `NOTION_WORKOUTS_DB` /
 `NOTION_BODY_DB` override them. A DB that 404s → "share it with the integration".
 
-**Live MAIN HUB layout** (as of first dashboard run, 2026-09-07): headings `Kepentingan Ipung:`
-(child pages + a `child_database`) and `Kalender Ipung:` (a **`bookmark` block — not a real
-`/embed`**, so it only renders a link card, plus four `child_database` blocks). The dashboard
-`toggle` was appended as the **last block, collapsed** — expand it in the UI, or drag it above the
-databases once (the `after` logic then keeps it there). Google Calendar still needs the bookmark
-replaced with a proper `/embed`.
+**Live MAIN HUB layout** (2026-09-07): headings `Kepentingan Ipung:` (child pages + a
+`child_database`) and `Kalender Ipung:` (a **`bookmark` block — not a real `/embed`**, so it only
+renders a link card, plus four `child_database` blocks). Since the `position: {"type": "start"}`
+change the dashboard `toggle` is re-created as the **first block** on the page every run. Google
+Calendar still needs the bookmark replaced with a proper `/embed`, and the quick-add views/buttons
++ the `Events` Calendar view are still a manual paste (README).
 
 **Current data state**: Body Metrics has **one row** — the InBody scan from 2026-07-07 (Urban Gym
 Bandung: Weight 96.3, BF% 31.0, SMM 38.1, BFM 29.9, Visceral Fat 12, BMI 31.4, WHR 0.98, InBody
@@ -150,22 +156,55 @@ PDF still needs attaching to `Lab report` by hand. No Workouts fall in the last 
 Hevy session is 2026-08-28) so the training panel reads 0/0; Tasks has 1 row flagged. The script
 is verified working against live Notion (one toggle, other page blocks untouched).
 
+## Notion → Google Calendar (`notion_to_gcal.py`)
+
+One-way push (Notion is still the source of truth). Runs on both crons. Two sources:
+
+- **Tasks** with a `Due` date and `Status ≠ Done` → an **all-day** event on the due date,
+  `summary = "📋 <name>"`, `transparency = transparent` (doesn't show as busy), `visibility =
+  private`, one `popup` reminder at `TASK_REMINDER_MIN` (540 = 09:00 local; `# ponytail:` fixed).
+- **Events** rows with a `When` value → a **timed** event (`start.dateTime` + `timeZone`, default
+  `GCAL_TZ = Asia/Jakarta`; end = `When`'s end or start + 1 h), `location` from `Location`,
+  calendar-default reminders. A `When` with no time → all-day.
+
+**Idempotency without write-back:** the Google event id is derived from the Notion page id —
+`event_id() = "nt" + <page id hex, 32 chars>` (valid Google id: a-v + digits). Upsert =
+`events.insert(id=…)`, and on `409` (id exists) → `events.patch`. Every event carries
+`extendedProperties.private.notionSync = "1"`. **Delete reconciliation:** once per run, list only
+`privateExtendedProperty=notionSync=1` events in a `[-7 d, +400 d]` window; any whose id isn't in
+the current live set (row deleted, marked Done, date cleared) gets `events.delete`, swallowing
+404/410. Hand-made calendar events (no `notionSync` tag) are never listed or touched.
+
+Auth: a Google Cloud **service account** JSON in `GCAL_SA_JSON`; the target calendar
+(`GCAL_CALENDAR_ID`, never `"primary"`) must be shared with the SA email as "Make changes to
+events". No OAuth dance, no token expiry. `google-api-python-client` + `google-auth` are imported
+lazily inside the Google-I/O functions so `--selfcheck` runs without the dependency. Prints
+`skip: not configured yet (…)` and exits 0 if the `GCAL_*` / `NOTION_EVENTS_DB` secrets are unset.
+
 ## Files
 
 Present:
 
 ```
 scripts/
-  setup_notion.py        # create the Tasks/Workouts/Body Metrics DBs + add any missing schema props. Run against MAIN HUB.
+  notion_common.py       # shared Notion helpers: env(), notion_headers(version=None), notion_query() paginator
+  setup_notion.py        # create the Tasks/Workouts/Body Metrics/Events DBs + add any missing schema props. Run against MAIN HUB.
   strava_to_notion.py    # Strava OAuth refresh -> activities since watermark -> upsert Workouts
   hevy_csv_to_notion.py  # parse committed data/hevy.csv (Hevy free export) -> upsert Weights Workouts
-  dashboard_to_notion.py # rebuild the "📊 Weekly Dashboard" toggle on MAIN HUB (training/body/tasks)
+  dashboard_to_notion.py # rebuild the "📊 Weekly Dashboard" toggle, pinned to the top of MAIN HUB
+  notion_to_gcal.py      # one-way push: Task deadlines + Events -> Google Calendar (deterministic event ids)
 data/
   hevy.csv               # committed Hevy "Export & Backup Data" CSV; re-export over it to add sessions.
 .github/workflows/
-  strava-sync.yml        # cron every 6h + manual: strava_to_notion.py, hevy_csv_to_notion.py, dashboard_to_notion.py
+  fast.yml               # cron every 30 min + manual: notion_to_gcal.py, dashboard_to_notion.py
+  strava-sync.yml        # cron every 6h + manual: strava + hevy + notion_to_gcal + dashboard
 AGENTS.md                # short pointer to this file + the ponytail/caveman working style
 ```
+
+`scripts/` is not a package; running `python scripts/<x>.py` puts that dir on `sys.path`, so
+`from notion_common import ...` resolves. `strava_to_notion.py`, `hevy_csv_to_notion.py`,
+`dashboard_to_notion.py`, `setup_notion.py`, `notion_to_gcal.py` all import from it (the
+`# ponytail:` "4th script" trigger fired).
 
 Planned (per Current status): `scripts/quicklog_to_notion.py` (Quick Log rows -> Workout rows,
 regex), `scripts/weekly_summary.py` (last-7-day Workouts vs targets + weight delta -> Weekly
@@ -182,14 +221,20 @@ In use now: `NOTION_TOKEN`, `NOTION_WORKOUTS_DB`, `STRAVA_CLIENT_ID`, `STRAVA_CL
 `NOTION_BODY_DB` (default to the IDs above). `setup_notion.py` uses `NOTION_TOKEN` +
 `NOTION_PARENT_PAGE`.
 
+`notion_to_gcal.py`: `NOTION_TOKEN`, `NOTION_EVENTS_DB` (required — from `setup_notion.py`),
+`GCAL_SA_JSON` (service-account key JSON, one line), `GCAL_CALENDAR_ID` (calendar id, e.g. the
+gmail address), optional `NOTION_TASKS_DB` (baked default), optional `GCAL_TZ` (default
+`Asia/Jakarta`). Missing any of the three required → the script prints `skip` and exits 0.
+
 Planned: `NOTION_QUICKLOG_DB`, `NOTION_SUMMARY_PAGE`.
 
 ## Commands
 
 ```
-pip install -r requirements.txt
-python3 scripts/strava_to_notion.py --selfcheck   # offline check of the pure helpers
-python3 scripts/<script>.py                        # real run, needs a filled .env
+pip install -r requirements.txt                    # requests + google-api-python-client + google-auth
+python3 scripts/strava_to_notion.py --selfcheck    # offline check of the pure helpers
+python3 scripts/notion_to_gcal.py --selfcheck      # ditto; google libs not needed for --selfcheck
+python3 scripts/<script>.py                         # real run, needs a filled .env
 ```
 
 No build, no lint, no test framework. Each non-trivial script keeps one `--selfcheck` /
@@ -198,8 +243,14 @@ eyeballing the rows; running any sync twice must create nothing the second time.
 
 ## Gotchas
 
-- **GitHub Actions free tier ≈ 2000 min/month (private repo).** `strava-sync.yml` is every 6h
-  (`0 */6 * * *`) ≈ 120 min/month. Hourly would be ≈ 720; don't schedule below ~30 min.
+- **GitHub Actions free tier ≈ 2000 min/month (private repo).** `fast.yml` every 30 min
+  (`*/30 * * * *`) ≈ 1440 min/month + `strava-sync.yml` every 6h ≈ 120 → ~1560, ~440 headroom.
+  The `pip` cache (`actions/setup-python` `cache: pip`) keeps each `fast` run ~1 min — don't drop
+  it. If minutes bite: widen `fast.yml` to `*/45`, or make the repo public (unlimited Actions
+  minutes) and go tighter.
+- **GitHub disables scheduled workflows after 60 days of no repo activity**, and cron is
+  best-effort — a `*/30` schedule really fires every ~30–45 min under load. The manual
+  "Run workflow" button on `fast.yml` is the instant-refresh escape hatch.
 - **Notion API can't create views, embeds, or linked databases** — the Tasks calendar/board view,
   the Google Calendar embed, and the MAIN HUB linked views are all done by hand in the Notion app.
 - **Notion API can't create a `status`-type property** — `Tasks.Status` is a plain select.
@@ -218,12 +269,18 @@ eyeballing the rows; running any sync twice must create nothing the second time.
   7 InBody number props to Body Metrics. One InBody row (2026-07-07) is in Body Metrics.
 - `strava_to_notion.py` never run for real — needs the one-time Strava OAuth (README) if access
   is ever obtained.
+- **Calendar feature — code landed, not yet wired up.** `notion_common.py`, `notion_to_gcal.py`,
+  `fast.yml`, the `Events` schema, and the google deps are committed; all `--selfcheck`s pass. Not
+  yet done: run `setup_notion.py` to create the `Events` DB; the Google Cloud project + service
+  account + calendar share; the `NOTION_EVENTS_DB` / `NOTION_TASKS_DB` / `GCAL_SA_JSON` /
+  `GCAL_CALENDAR_ID` Actions secrets; the manual MAIN HUB views (quick-add Tasks/Workouts, `Events`
+  Calendar view) and the real Google Calendar `/embed`. Until the secrets exist `notion_to_gcal.py`
+  prints `skip` and the workflows stay green.
 - Remaining per the plan's build order:
   - add the Quick Log DB to `setup_notion.py` (+ `QuickLog` to `Workouts.Source`).
   - Weekly Check-in page + `weekly_summary.py` + `weekly-summary.yml`.
   - `quicklog_to_notion.py` + wire it into the sync workflow.
-  - manual Notion polish: Tasks calendar/board views, replace the MAIN HUB Google Calendar
-    `bookmark` with a real `/embed`, linked-DB views, attach the InBody PDF to `Lab report`.
+  - attach the InBody PDF to `Lab report` by hand.
   - rename `strava-sync.yml` -> `sync.yml` (and drop or keep the parked Strava step).
 - The Notion integration token was pasted in a chat once — rotate it at
   <https://www.notion.so/my-integrations> and update `.env` + the `NOTION_TOKEN` Actions secret.

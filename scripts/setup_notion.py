@@ -19,8 +19,9 @@ import sys
 
 import requests
 
-API = "https://api.notion.com/v1"
-NOTION_VERSION = "2022-06-28"
+from notion_common import API, notion_headers
+
+headers = notion_headers  # local alias; call sites below use headers()
 
 
 def sel(*names: str) -> dict:
@@ -34,6 +35,14 @@ SCHEMAS: dict[str, dict] = {
         "Due": {"date": {}},
         "Priority": sel("High", "Medium", "Low"),
         "Project": {"select": {"options": []}},
+        "Notes": {"rich_text": {}},
+    },
+    # Meetings/appointments — synced one-way to Google Calendar by notion_to_gcal.py.
+    # In Notion, use a Calendar view of this DB as the entry surface (no table needed).
+    "Events": {
+        "Name": {"title": {}},
+        "When": {"date": {}},        # set a start time (and end time) in the date picker
+        "Location": {"rich_text": {}},
         "Notes": {"rich_text": {}},
     },
     "Workouts": {
@@ -67,17 +76,6 @@ SCHEMAS: dict[str, dict] = {
         "BMR": {"number": {}},
     },
 }
-
-
-def headers() -> dict:
-    tok = os.environ.get("NOTION_TOKEN")
-    if not tok:
-        sys.exit("missing NOTION_TOKEN")
-    return {
-        "Authorization": f"Bearer {tok}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
 
 
 def existing_child_dbs(page_id: str) -> dict[str, str]:

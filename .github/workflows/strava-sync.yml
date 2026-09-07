@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - run: pip install -r requirements.txt
       - run: python scripts/strava_to_notion.py
         continue-on-error: true   # missing Strava secrets shouldn't block the Hevy step below
@@ -27,6 +28,15 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_WORKOUTS_DB: ${{ secrets.NOTION_WORKOUTS_DB }}
+      # One-way push of Task deadlines + Events to Google Calendar. Prints "skip" until the GCAL_* secrets exist.
+      - run: python scripts/notion_to_gcal.py
+        continue-on-error: true   # a Google API hiccup mustn't block the dashboard step
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_TASKS_DB: ${{ secrets.NOTION_TASKS_DB }}
+          NOTION_EVENTS_DB: ${{ secrets.NOTION_EVENTS_DB }}
+          GCAL_SA_JSON: ${{ secrets.GCAL_SA_JSON }}
+          GCAL_CALENDAR_ID: ${{ secrets.GCAL_CALENDAR_ID }}
       # Rebuilds the "📊 Weekly Dashboard" toggle on the MAIN HUB page (training / body / tasks).
       # DB + page IDs are baked into the script; only the token is needed here.
       - run: python scripts/dashboard_to_notion.py

@@ -1,0 +1,32 @@
+name: fast
+
+# Frequent refresh so the MAIN HUB dashboard and Google Calendar reflect new
+# Notion rows within ~30 min (Notion Free can't push, and the repo runs no server).
+# GitHub cron is best-effort — the real interval is ~30-45 min under load.
+# Cost: ~1 Actions minute/run x 48/day x 30 ≈ 1440 min/month (free tier ≈ 2000).
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scripts/notion_to_gcal.py
+        continue-on-error: true   # a Google API hiccup mustn't block the dashboard step
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_TASKS_DB: ${{ secrets.NOTION_TASKS_DB }}
+          NOTION_EVENTS_DB: ${{ secrets.NOTION_EVENTS_DB }}
+          GCAL_SA_JSON: ${{ secrets.GCAL_SA_JSON }}
+          GCAL_CALENDAR_ID: ${{ secrets.GCAL_CALENDAR_ID }}
+      - run: python scripts/dashboard_to_notion.py
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}

@@ -13,14 +13,14 @@ Usage:
 """
 from __future__ import annotations
 
-import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
 
 import requests
 
-NOTION_VERSION = "2022-06-28"
+from notion_common import env, notion_headers
+
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_ACTIVITIES_URL = "https://www.strava.com/api/v3/athlete/activities"
 
@@ -48,13 +48,6 @@ def seconds_to_min(s: float | None) -> float | None:
     return round(s / 60, 1) if s else None
 
 
-def env(name: str, default: str | None = None) -> str:
-    v = os.environ.get(name, default)
-    if v is None:
-        sys.exit(f"missing required env var: {name}")
-    return v
-
-
 def strava_access_token() -> str:
     r = requests.post(STRAVA_TOKEN_URL, data={
         "client_id": env("STRAVA_CLIENT_ID"),
@@ -64,14 +57,6 @@ def strava_access_token() -> str:
     }, timeout=30)
     r.raise_for_status()
     return r.json()["access_token"]
-
-
-def notion_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {env('NOTION_TOKEN')}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
 
 
 def latest_strava_date(db_id: str) -> datetime:
