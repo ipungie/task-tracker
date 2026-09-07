@@ -113,8 +113,9 @@ def task_event_body(row: dict) -> dict | None:
         "summary": "📋 " + _title(props),
         "start": {"date": day},
         "end": {"date": _next_day(day)},
-        "transparency": "transparent",
-        "visibility": "private",
+        "transparency": "transparent",  # free, not busy
+        # ponytail: no "visibility":"private" — an unauthenticated Notion /embed of a public
+        # calendar strips private events, and it's your own calendar anyway.
         "reminders": {"useDefault": False,
                       "overrides": [{"method": "popup", "minutes": TASK_REMINDER_MIN}]},
         "extendedProperties": _tagged(row["id"], "task"),

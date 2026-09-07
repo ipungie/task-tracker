@@ -161,8 +161,9 @@ is verified working against live Notion (one toggle, other page blocks untouched
 One-way push (Notion is still the source of truth). Runs on both crons. Two sources:
 
 - **Tasks** with a `Due` date and `Status ≠ Done` → an **all-day** event on the due date,
-  `summary = "📋 <name>"`, `transparency = transparent` (doesn't show as busy), `visibility =
-  private`, one `popup` reminder at `TASK_REMINDER_MIN` (540 = 09:00 local; `# ponytail:` fixed).
+  `summary = "📋 <name>"`, `transparency = transparent` (free, not busy), one `popup` reminder at
+  `TASK_REMINDER_MIN` (540 = 09:00 local; `# ponytail:` fixed). No `visibility = private` — an
+  unauthenticated Notion `/embed` of a public calendar hides private events.
 - **Events** rows with a `When` value → a **timed** event (`start.dateTime` + `timeZone`, default
   `GCAL_TZ = Asia/Jakarta`; end = `When`'s end or start + 1 h), `location` from `Location`,
   calendar-default reminders. A `When` with no time → all-day.
