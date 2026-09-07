@@ -18,9 +18,10 @@ Two domains:
 1. **Work** — tasks with deadlines, a board/calendar view, an embedded Google Calendar. All native
    Notion; no code.
 2. **Health/fitness** — body composition from InBody scans (manual entry), cardio auto-pulled from
-   Strava, lifts typed into a Quick Log and parsed by regex, and a weekly check-in that compares
-   logged activity to fixed targets. **No calorie math** — TDEE/burn estimates are ±20% noise;
-   correction comes from the next InBody, not arithmetic.
+   Strava, lifts from a committed Hevy CSV export (and, planned, a typed Quick Log parsed by
+   regex), and a weekly check-in that compares logged activity to fixed targets. **No calorie
+   math** — TDEE/burn estimates are ±20% noise; correction comes from the next InBody, not
+   arithmetic.
 
 Full rationale and the rejected alternatives (custom app, git+markdown, Obsidian) are in the plan
 file that seeded this repo: `~/.claude/plans/ancient-baking-pony.md`.
@@ -37,8 +38,9 @@ file that seeded this repo: `~/.claude/plans/ancient-baking-pony.md`.
   by `External ID` before creating.
 - **Secrets never in the repo.** `.env` is gitignored; `.env.example` documents the names; real
   values live in GitHub Actions repository secrets.
-- **`setup_notion.py` must stay idempotent** — safe to re-run; it skips existing databases and only
-  adds missing properties.
+- **`setup_notion.py` must stay idempotent** — safe to re-run; it skips any database that already
+  exists as a child of the page. (It does *not* yet patch missing properties onto an existing
+  database — build-order item, see Current status.)
 - Prefer the laziest thing that works (this repo runs the `ponytail` + `caveman` skills). Regex over
   an LLM, a Notion embed over a sync, cron over a webhook. Mark deliberate corners with a
   `# ponytail:` comment naming the ceiling.
@@ -53,8 +55,8 @@ Parent page **MAIN HUB**: `be220a6633b8426ab6f88e563d168e8a`
 | Tasks | `3d4fdaa633b081638123f1307cd1f7af` |
 | Workouts | `3d4fdaa633b081cfbc6ed0d096baa224` |
 | Body Metrics | `3d4fdaa633b081bc8e1ac8e607ead38a` |
-| Quick Log | created by `setup_notion.py` — put its ID in `.env` as `NOTION_QUICKLOG_DB` |
-| Weekly Check-in (page) | created during setup — `.env` as `NOTION_SUMMARY_PAGE` |
+| Quick Log | *planned* — to be created by `setup_notion.py`; ID goes in `.env` as `NOTION_QUICKLOG_DB` |
+| Weekly Check-in (page) | *planned* — created during setup; `.env` as `NOTION_SUMMARY_PAGE` |
 
 ## Notion schema
 
@@ -65,13 +67,17 @@ Parent page **MAIN HUB**: `be220a6633b8426ab6f88e563d168e8a`
   (select: Strava/Hevy/Manual/QuickLog), `Distance` (number, km), `Duration` (number, min),
   `Avg HR` (number), `Exercises` (text), `External ID` (text, the upsert key), `Link` (url).
   **Property names are matched by string in the scripts — don't rename without updating the code.**
-- **Body Metrics**: `Date`, `Weight`, `Body Fat %`, `Resting HR`, `BP` (text), `Lab report` (files —
-  attach the InBody PDF by hand), `Notes`, plus numbers `SMM`, `Body Fat Mass`, `Visceral Fat`,
-  `BMI`, `Waist-Hip Ratio`, `InBody Score`, `BMR`.
+- **Body Metrics**: `Entry` (title), `Date`, `Weight`, `Body Fat %`, `Resting HR`, `BP` (text),
+  `Lab report` (files — attach the InBody PDF by hand), `Notes`. **Intended** (not yet created by
+  `setup_notion.py`): numbers `SMM`, `Body Fat Mass`, `Visceral Fat`, `BMI`, `Waist-Hip Ratio`,
+  `InBody Score`, `BMR`. The dashboard already reads them if present (absent ones are skipped) —
+  add them in the Notion UI or extend `setup_notion.py`.
 - **Quick Log**: `Note` (title — the typed line), `Date` (date, default today), `Parsed` (checkbox),
   `Result` (text — parser summary or error).
 
-## Quick Log format (parsed by `quicklog_to_notion.py`)
+## Quick Log format (parsed by `quicklog_to_notion.py`) — NOT BUILT YET
+
+Design intent for a future `quicklog_to_notion.py`; no script, DB, or workflow step exists yet.
 
 One session per row. Lines separated by comma or newline. Optional leading `YYYY-MM-DD:` overrides
 the row's `Date`.
@@ -89,7 +95,7 @@ entries were created; always write what happened (or why not) to `Result`.
 
 Bulk lift logging without typing every set into Quick Log — and without Hevy Pro (the Hevy *API*
 needs it; the free CSV doesn't). Flow: in the Hevy app, Settings → Export & Backup Data → save the
-workouts CSV as `data/hevy.csv`, commit it. The script (in `sync.yml`, hourly) reads that file —
+workouts CSV as `data/hevy.csv`, commit it. The script (in `strava-sync.yml`, every 6h) reads that file —
 one row per set — groups rows into sessions by `start_time`, and writes one `Type = Weights`,
 `Source = Hevy` Workout row per session. `Exercises` uses the same normalised shape as Quick Log
 (`Squat 4x5 @100kg; Bench 8@60,8@60,7@62.5kg` when sets vary); warm-up sets are dropped; timed
@@ -146,31 +152,37 @@ matching. All three panels populate once real rows land — the script itself is
 
 ## Files
 
+Present:
+
 ```
 scripts/
-  setup_notion.py        # one-shot/idempotent: create DBs, patch missing props. Run against MAIN HUB.
-  strava_to_notion.py    # hourly: Strava OAuth refresh -> activities since watermark -> upsert Workouts
-  hevy_csv_to_notion.py  # hourly: parse committed data/hevy.csv (Hevy free export) -> upsert Weights Workouts
-  dashboard_to_notion.py # hourly: rebuild the "📊 Weekly Dashboard" toggle on MAIN HUB (training/body/tasks)
-  quicklog_to_notion.py  # hourly: unparsed Quick Log rows -> Workout row(s), regex
-  weekly_summary.py       # weekly: last-7-day Workouts vs targets + weight delta -> block on Weekly Check-in
+  setup_notion.py        # one-shot: create the Tasks/Workouts/Body Metrics DBs. Run against MAIN HUB.
+  strava_to_notion.py    # Strava OAuth refresh -> activities since watermark -> upsert Workouts
+  hevy_csv_to_notion.py  # parse committed data/hevy.csv (Hevy free export) -> upsert Weights Workouts
+  dashboard_to_notion.py # rebuild the "📊 Weekly Dashboard" toggle on MAIN HUB (training/body/tasks)
 data/
-  hevy.csv               # committed Hevy "Export & Backup Data" CSV; re-export over it to add sessions. Not present until first export.
+  hevy.csv               # committed Hevy "Export & Backup Data" CSV; re-export over it to add sessions.
 .github/workflows/
-  sync.yml               # cron hourly + manual: strava_to_notion.py, hevy_csv_to_notion.py, dashboard_to_notion.py, quicklog_to_notion.py
-  weekly-summary.yml      # cron Mon 06:00 UTC + manual: weekly_summary.py
+  strava-sync.yml        # cron every 6h + manual: strava_to_notion.py, hevy_csv_to_notion.py, dashboard_to_notion.py
 AGENTS.md                # short pointer to this file + the ponytail/caveman working style
 ```
 
-`dashboard_to_notion.py` and `weekly_summary.py` share the same targets, constants at the top of
-each file: `CARDIO_MIN_TARGET = 200`, `LIFT_TARGET = 2`.
+Planned (per Current status): `scripts/quicklog_to_notion.py` (Quick Log rows -> Workout rows,
+regex), `scripts/weekly_summary.py` (last-7-day Workouts vs targets + weight delta -> Weekly
+Check-in page), and a `weekly-summary.yml` workflow. `strava-sync.yml` was to be renamed `sync.yml`.
+
+`dashboard_to_notion.py` (and the planned `weekly_summary.py`) share the same targets, constants at
+the top of each file: `CARDIO_MIN_TARGET = 200`, `LIFT_TARGET = 2`.
 
 ## Env vars
 
-`NOTION_TOKEN`, `NOTION_WORKOUTS_DB`, `NOTION_QUICKLOG_DB`, `NOTION_BODY_DB`, `NOTION_SUMMARY_PAGE`,
-`STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN`, optional `STRAVA_BACKFILL_DAYS`,
-optional `HEVY_CSV_PATH` (default `data/hevy.csv`), optional `NOTION_MAIN_HUB` / `NOTION_TASKS_DB`
-(dashboard; default to the IDs above).
+In use now: `NOTION_TOKEN`, `NOTION_WORKOUTS_DB`, `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`,
+`STRAVA_REFRESH_TOKEN`, optional `STRAVA_BACKFILL_DAYS`, optional `HEVY_CSV_PATH` (default
+`data/hevy.csv`), optional dashboard overrides `NOTION_MAIN_HUB` / `NOTION_TASKS_DB` /
+`NOTION_BODY_DB` (default to the IDs above). `setup_notion.py` uses `NOTION_TOKEN` +
+`NOTION_PARENT_PAGE`.
+
+Planned: `NOTION_QUICKLOG_DB`, `NOTION_SUMMARY_PAGE`.
 
 ## Commands
 
@@ -186,8 +198,8 @@ eyeballing the rows; running any sync twice must create nothing the second time.
 
 ## Gotchas
 
-- **GitHub Actions free tier ≈ 2000 min/month (private repo).** Hourly `sync.yml` ≈ 720 min/month.
-  Don't schedule it below ~30 min.
+- **GitHub Actions free tier ≈ 2000 min/month (private repo).** `strava-sync.yml` is every 6h
+  (`0 */6 * * *`) ≈ 120 min/month. Hourly would be ≈ 720; don't schedule below ~30 min.
 - **Notion API can't create views, embeds, or linked databases** — the Tasks calendar/board view,
   the Google Calendar embed, and the MAIN HUB linked views are all done by hand in the Notion app.
 - **Notion API can't create a `status`-type property** — `Tasks.Status` is a plain select.
@@ -198,13 +210,21 @@ eyeballing the rows; running any sync twice must create nothing the second time.
 
 ## Current status
 
-- `setup_notion.py` created Tasks / Workouts / Body Metrics under MAIN HUB.
-- Repo skeleton + `strava_to_notion.py` + a `strava-sync.yml` committed locally (`77f72a9`,
-  `d95633c`). **Not pushed** — the private GitHub repo `ipungie/personal-task-tracker` doesn't
-  exist yet.
-- Remaining per the plan's build order: extend `setup_notion.py` (Quick Log DB + Body Metrics
-  props + `QuickLog` source), seed the InBody row, Weekly Check-in page, write
-  `quicklog_to_notion.py` and `weekly_summary.py`, Strava OAuth, push + schedule, manual Notion
-  polish. `strava-sync.yml` becomes `sync.yml`.
+- `setup_notion.py` created Tasks / Workouts / Body Metrics under MAIN HUB (base props only).
+- Committed locally: `setup_notion.py`, `strava_to_notion.py`, `hevy_csv_to_notion.py`,
+  `dashboard_to_notion.py`, `strava-sync.yml`, `data/hevy.csv`, `AGENTS.md`. All `--selfcheck`s
+  pass; `dashboard_to_notion.py` has been run against live Notion (twice, clean). **Not pushed** —
+  the private GitHub repo `ipungie/personal-task-tracker` doesn't exist yet, so CI has never run.
+- `strava_to_notion.py` not yet run for real — needs the one-time Strava OAuth (README).
+- Remaining per the plan's build order:
+  - extend `setup_notion.py`: patch missing props onto existing DBs, add the Body Metrics numbers,
+    add the Quick Log DB, add `QuickLog` to `Workouts.Source`.
+  - seed the InBody baseline row in Body Metrics (Body panel is empty until then).
+  - Weekly Check-in page + `weekly_summary.py` + `weekly-summary.yml`.
+  - `quicklog_to_notion.py` + wire it into the sync workflow.
+  - Strava OAuth; create the private GitHub repo, push, add Actions secrets, dispatch once.
+  - manual Notion polish: Tasks calendar/board views, replace the MAIN HUB Google Calendar
+    `bookmark` with a real `/embed`, linked-DB views.
+  - rename `strava-sync.yml` -> `sync.yml`.
 - The Notion integration token was pasted in a chat once and should be rotated at
-  <https://www.notion.so/my-integrations>.
+  <https://www.notion.so/my-integrations> before the repo is pushed.

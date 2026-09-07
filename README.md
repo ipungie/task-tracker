@@ -6,8 +6,10 @@ server to keep alive.
 
 - **Work** — tasks with deadlines, a calendar/board view, and an embedded Google Calendar, all in
   Notion.
-- **Health/fitness** — a Workouts database fed from Strava (via `scripts/strava_to_notion.py`), plus
-  a Body Metrics database for weight, labs, and vitals (manual entry).
+- **Health/fitness** — a Workouts database fed from Strava (`scripts/strava_to_notion.py`) and from
+  a committed Hevy CSV export (`scripts/hevy_csv_to_notion.py`), a Body Metrics database for weight,
+  labs, and vitals (manual entry), and a "📊 Weekly Dashboard" toggle rebuilt on the MAIN HUB page
+  each run (`scripts/dashboard_to_notion.py`).
 
 Full rationale for choosing Notion over a custom app / plain-files setup lives in the plan file that
 seeded this repo.
@@ -24,7 +26,9 @@ repo.
 
 1. Create an internal integration at <https://www.notion.so/my-integrations>, copy the token.
 2. Create these databases in one workspace and **share each one with the integration** (••• → Add
-   connections):
+   connections). `NOTION_TOKEN=... NOTION_PARENT_PAGE=<MAIN HUB page id> python scripts/setup_notion.py`
+   creates the three base databases for you (it skips any that already exist); the extra Body Metrics
+   number fields below are not created yet — add them by hand if you want them on the dashboard:
 
    **Tasks** — `Name` (title), `Status` (select: Todo / Doing / Blocked / Done), `Due` (date),
    `Priority` (select), `Project` (select or relation), `Notes` (text). Add a calendar view on
@@ -35,12 +39,14 @@ repo.
    `Avg HR` (number), `Exercises` (text), `External ID` (text), `Link` (url).
    *Property names must match exactly — the script sets them by name.*
 
-   **Body Metrics** — `Date` (date), `Weight` (number), `Body Fat %` (number),
-   `Resting HR` (number), `BP` (text), `Lab report` (files), `Notes` (text).
+   **Body Metrics** — `Entry` (title), `Date` (date), `Weight` (number), `Body Fat %` (number),
+   `Resting HR` (number), `BP` (text), `Lab report` (files), `Notes` (text). Optional numbers the
+   dashboard will also show if present: `SMM`, `Body Fat Mass`, `Visceral Fat`, `BMI`,
+   `Waist-Hip Ratio`, `InBody Score`, `BMR`.
 
-3. Create a **Dashboard** page. Add a `/embed` block with your Google Calendar's secret embed URL
-   (Google Calendar → Settings → your calendar → *Integrate calendar* → *Public URL to this
-   calendar* / embed code). Add linked views of the databases above.
+3. On the **MAIN HUB** page (the dashboard script writes its toggle here), add a `/embed` block with
+   your Google Calendar's secret embed URL (Google Calendar → Settings → your calendar → *Integrate
+   calendar* → *Public URL to this calendar* / embed code). Add linked views of the databases above.
 4. Note each database ID — the 32 hex chars in its URL
    (`notion.so/<workspace>/<DATABASE_ID>?v=...`).
 
@@ -83,7 +89,7 @@ You then need a **refresh token** with the `activity:read_all` scope:
 python scripts/strava_to_notion.py --selfcheck   # offline sanity check of the pure helpers
 python scripts/strava_to_notion.py               # real run
 python scripts/hevy_csv_to_notion.py             # import data/hevy.csv (Hevy free export) into Workouts
-python scripts/dashboard_to_notion.py            # rebuild the "📊 Weekly Dashboard" on the Dashboard page
+python scripts/dashboard_to_notion.py            # rebuild the "📊 Weekly Dashboard" on the MAIN HUB page
 ```
 
 `strava_to_notion.py` looks at the newest `Source = Strava` row in Workouts and fetches activities
@@ -92,7 +98,7 @@ Workout row per new activity. Running it twice in a row must report `0 created` 
 that's the duplicate-prevention working.
 
 `dashboard_to_notion.py` reads the Workouts / Body Metrics / Tasks databases and rebuilds a single
-toggle block ("📊 Weekly Dashboard") on the Dashboard page each run — this week's training vs
+toggle block ("📊 Weekly Dashboard") on the MAIN HUB page each run — this week's training vs
 targets, latest body metrics vs baseline, and tasks that are overdue / due soon / high priority / in
 progress. It only ever touches that one toggle; the Google Calendar `/embed` and linked views from
 step 3 of *Notion setup* are left alone (the Notion API can't create those — they stay a one-time
@@ -113,9 +119,10 @@ Secrets are per-repo — if you ever move the repo to another host/account, re-a
 If Strava sync starts failing with 401s, redo *Strava: one-time OAuth* above to get a fresh
 `refresh_token`, then update both `.env` and the `STRAVA_REFRESH_TOKEN` GitHub secret.
 
-## Adding Hevy later
+## Hevy import
 
-Hevy's API needs a paid Hevy Pro subscription, so it's out for now. Until then, log lifts directly
-in the Workouts database (`Source = Manual`). When you want automation, add
-`scripts/hevy_csv_import.py` that parses Hevy's CSV export and upserts by
-`External ID = hevy:<...>`, and give it its own workflow.
+Hevy's *API* needs a paid Hevy Pro subscription, so this uses the free export instead: Hevy app →
+Settings → Export & Backup Data → save the workouts CSV as `data/hevy.csv` and commit it.
+`scripts/hevy_csv_to_notion.py` (in the sync workflow) groups it into one `Source = Hevy` Workout
+row per session, keyed by `External ID = hevy:<start_time ISO>` so re-exporting a longer CSV over
+the file only adds the new sessions. Missing file = no-op. See CLAUDE.md for the CSV-format notes.
