@@ -1,6 +1,11 @@
 # CLAUDE.md
 
-Guidance for Claude Code working in this repo.
+Guidance for Claude Code working in this repo. `AGENTS.md` is a short pointer back here for other
+agents; this file stays the source of truth.
+
+**Working style:** this repo runs the `ponytail` (laziest solution that works) and `caveman` (terse
+chat output) skills — apply both to every change. Prose in code, comments, commits, and docs stays
+normal English.
 
 ## What this is
 
@@ -154,6 +159,7 @@ data/
 .github/workflows/
   sync.yml               # cron hourly + manual: strava_to_notion.py, hevy_csv_to_notion.py, dashboard_to_notion.py, quicklog_to_notion.py
   weekly-summary.yml      # cron Mon 06:00 UTC + manual: weekly_summary.py
+AGENTS.md                # short pointer to this file + the ponytail/caveman working style
 ```
 
 `dashboard_to_notion.py` and `weekly_summary.py` share the same targets, constants at the top of
