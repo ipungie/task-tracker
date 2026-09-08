@@ -132,6 +132,13 @@ Three panels, built by pure functions (parsed rows in, block dicts out — `--se
   property present (preferred order first, then any extras). One row → values only. No rows → "none
   yet". `# ponytail:` baseline is the oldest row; switch to previous-row if InBody scans get
   frequent.
+  - **Trend graph (wanted, not built):** the user wants a real chart of the InBody history. Plan:
+    backfill the ~8 rows from the scan PDF's "Body Composition History" strip (Weight ~93.3→96.3,
+    SMM ~35.8→38.1, PBF ~32→31; the printed dates are half-legible — get them from the user), then
+    add a native Notion `/chart` line block on MAIN HUB (X = `Date`, Y = `Weight`, overlay
+    `Body Fat %` / `SMM`). Notion draws it; the API can't create the block — manual, like the
+    other views. It then extends itself every future scan. A rendered PNG via matplotlib was
+    rejected (new heavy dep + Notion file-upload for a quarterly scan).
 - **✅ Needs attention (N)** — Tasks with `Status ≠ Done` that are overdue, due within 7 days,
   `Priority = High`, or `Status = Doing`. One `to_do` (unchecked) each: a page-mention chip +
   ` — <due> · <priority>`, `⚠️ ` prefix when overdue. Overdue first, then soonest due; capped at 15
@@ -262,22 +269,28 @@ eyeballing the rows; running any sync twice must create nothing the second time.
 
 ## Current status
 
-- Pushed to `github.com/ipungie/task-tracker` (private). `strava-sync.yml` runs on Actions every
-  6h; a manual dispatch on 2026-09-07 went green (Strava step 400s and is skipped via
-  `continue-on-error`; Hevy + dashboard steps pass).
-- Actions secrets set: `NOTION_TOKEN`, `NOTION_WORKOUTS_DB`. Strava secrets not set (no API access).
-- `setup_notion.py` created Tasks / Workouts / Body Metrics under MAIN HUB and has since added the
-  7 InBody number props to Body Metrics. One InBody row (2026-07-07) is in Body Metrics.
+- Pushed to `github.com/ipungie/task-tracker` (private). Two workflows on Actions: `fast.yml`
+  every 30 min (`notion_to_gcal.py` + `dashboard_to_notion.py`), `strava-sync.yml` every 6h
+  (strava + hevy + gcal + dashboard). Both green.
+- Actions secrets set: `NOTION_TOKEN`, `NOTION_WORKOUTS_DB`, `NOTION_TASKS_DB`, `NOTION_EVENTS_DB`,
+  `GCAL_SA_JSON`, `GCAL_CALENDAR_ID`. Strava secrets not set (no API access — its step 400s and is
+  skipped via `continue-on-error`).
+- `setup_notion.py` created Tasks / Workouts / Body Metrics / Events under MAIN HUB, plus the 7
+  InBody number props on Body Metrics. One InBody row (2026-07-07) in Body Metrics.
 - `strava_to_notion.py` never run for real — needs the one-time Strava OAuth (README) if access
   is ever obtained.
-- **Calendar feature — code landed, not yet wired up.** `notion_common.py`, `notion_to_gcal.py`,
-  `fast.yml`, the `Events` schema, and the google deps are committed; all `--selfcheck`s pass. Not
-  yet done: run `setup_notion.py` to create the `Events` DB; the Google Cloud project + service
-  account + calendar share; the `NOTION_EVENTS_DB` / `NOTION_TASKS_DB` / `GCAL_SA_JSON` /
-  `GCAL_CALENDAR_ID` Actions secrets; the manual MAIN HUB views (quick-add Tasks/Workouts, `Events`
-  Calendar view) and the real Google Calendar `/embed`. Until the secrets exist `notion_to_gcal.py`
-  prints `skip` and the workflows stay green.
+- **Calendar sync — working.** `notion_to_gcal.py` runs live: it created a Google Calendar event
+  for the one Task with a due date, and a re-run reported `0 created, 1 updated` (idempotent).
+  Google Calendar API had to be enabled in the GCP project (a 403 on first run). Task events use
+  `visibility: "default"` (not `private`) so an unauthenticated Notion `/embed` doesn't hide them.
+- Manual MAIN HUB steps still to do (Notion app, README §3): quick-add Tasks/Workouts linked views
+  + `＋` buttons, the `Events` Calendar view, and replacing the Google Calendar `bookmark` with a
+  real `/embed` (the user reported the embed not showing synced events — likely the embed URL is
+  the public one on a calendar shared "free/busy only", or Notion's embed cache; see the fix notes
+  in that chat).
 - Remaining per the plan's build order:
+  - backfill the InBody history rows + add a Notion `/chart` block for the body trend (see the
+    Body panel note above).
   - add the Quick Log DB to `setup_notion.py` (+ `QuickLog` to `Workouts.Source`).
   - Weekly Check-in page + `weekly_summary.py` + `weekly-summary.yml`.
   - `quicklog_to_notion.py` + wire it into the sync workflow.
